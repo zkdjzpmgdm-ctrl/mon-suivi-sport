@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
+import ShoppingTab from "./ShoppingTab";
+import RecipesTab from "./RecipesTab";
 
 const PROGRAM = {
   PUSH: {
@@ -688,9 +690,9 @@ export default function App() {
         <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: 1 }}>{tab === "workout" ? "💪 Séances" : "🥗 Diète"}</div>
         <div style={{ fontSize: 11, color: "#8888aa", marginTop: 2 }}>{new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</div>
       </div>
-      {tab === "workout" ? <WorkoutTab /> : <DietTab />}
+      {tab === "workout" ? <WorkoutTab /> : tab === "diet" ? <DietTab /> : tab === "shopping" ? <ShoppingTab /> : <RecipesTab />}
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "#fff", borderTop: "1px solid #e8e8e8", display: "flex", zIndex: 100 }}>
-        {[{ key: "workout", emoji: "💪", label: "Séances" }, { key: "diet", emoji: "🥗", label: "Diète" }].map(t => (
+        {[{ key: "workout", emoji: "💪", label: "Séances" }, { key: "diet", emoji: "🥗", label: "Diète" }, { key: "shopping", emoji: "🛒", label: "Courses" }, { key: "recipes", emoji: "🍳", label: "Recettes" }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ flex: 1, border: "none", background: "transparent", padding: "10px 0 12px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <span style={{ fontSize: 20 }}>{t.emoji}</span>
