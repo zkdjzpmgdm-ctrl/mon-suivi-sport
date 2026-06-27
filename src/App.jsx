@@ -151,10 +151,17 @@ function FoodSearch({ onAdd, onClose }) {
       const url = `/api/food-search?q=${encodeURIComponent(query)}`;
       const res = await fetch(url);
       const data = await res.json();
-      const items = (data.products || []).filter(p =>
-        p.product_name && p.nutriments &&
-        p.nutriments["energy-kcal_100g"] != null
-      ).slice(0, 8);
+      const items = (data.products || [])
+        .filter(p => p.product_name && p.product_name.trim() !== "")
+        .map(p => {
+          const n = p.nutriments || {};
+          const kcal = n["energy-kcal_100g"] || n["energy-kcal"] ||
+            (n["energy_100g"] ? Math.round(n["energy_100g"] / 4.184) : 0) ||
+            (n["energy-kj_100g"] ? Math.round(n["energy-kj_100g"] / 4.184) : 0);
+          return { ...p, nutriments: { ...n, "energy-kcal_100g": kcal } };
+        })
+        .filter(p => p.nutriments["energy-kcal_100g"] >= 0)
+        .slice(0, 8);
       setResults(items);
       if (items.length === 0) setError("Aucun résultat. Essaie un autre terme.");
     } catch {
