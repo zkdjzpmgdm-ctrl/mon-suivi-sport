@@ -1,6 +1,4 @@
-import { useState, useEffect } from "react";
-
-// ─── DONNÉES PROGRAMME ───────────────────────────────────────────────────────
+import { useState, useEffect, useCallback } from "react";
 
 const PROGRAM = {
   PUSH: {
@@ -59,7 +57,6 @@ const PROGRAM = {
     ],
   },
 };
-
 const MEALS = {
   PETITDEJ: {
     label: "Petit-déjeuner", emoji: "🌅", color: "#e8a020",
@@ -105,22 +102,16 @@ const DAILY_TARGET = { kcal: 2900, protein: 165, carbs: 365, fat: 90 };
 const WORKOUT_KEY = "workout_log_v1";
 const DIET_KEY = "diet_log_v1";
 
-// ─── UTILS ───────────────────────────────────────────────────────────────────
-
 function todayKey() { return new Date().toISOString().slice(0, 10); }
-
 function formatDate(str) {
   const d = new Date(str + "T12:00:00");
   return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
 }
-
 function useStorage(key, def) {
   const [val, setVal] = useState(() => { try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : def; } catch { return def; } });
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }, [key, val]);
   return [val, setVal];
 }
-
-// ─── COMPOSANTS PARTAGÉS ─────────────────────────────────────────────────────
 
 function MacroBar({ label, value, target, color }) {
   const pct = Math.min((value / target) * 100, 100);
@@ -139,9 +130,423 @@ function MacroBar({ label, value, target, color }) {
     </div>
   );
 }
+function FoodSearch({ onAdd, onClose }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [grams, setGrams] = useState("100");
+  const [error, setError] = useState("");
 
-// ─── SUIVI SÉANCES ───────────────────────────────────────────────────────────
+  const search = useCallback(async () => {
+    if (!query.trim()) return;
+    setLoading(true);
+    setError("");
+    setResults([]);
+    try {
+      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=10&lc=fr&cc=fr`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const items = (data.products || []).filter(p =>
+        p.product_name && p.nutriments &&
+        p.nutriments["energy-kcal_100g"] != null
+      ).slice(0, 8);
+      setResults(items);
+      if (items.length === 0) setError("Aucun résultat. Essaie un autre terme.");
+    } catch {
+      setError("Erreur de connexion. Vérifie ta connexion internet.");
+    }
+    setLoading(false);
+  }, [query]);
 
+  function computeMacros(product, g) {
+    const n = product.nutriments;
+    const factor = parseFloat(g) / 100;
+    return {
+      kcal: Math.round((n["energy-kcal_100g"] || 0) * factor),
+      protein: Math.round((n["proteins_100g"] || 0) * factor * 10) / 10,
+      carbs: Math.round((n["carbohydrates_100g"] || 0) * factor * 10) / 10,
+      fat: Math.round((n["fat_100g"] || 0) * factor * 10) / 10,
+    };
+  }
+
+  function confirmAdd() {
+    if (!selected || !grams) return;
+    const macros = computeMacros(selected, grams);
+    onAdd({
+      name: `${selected.product_name} (${grams}g)`,
+      items: [`${grams}g de ${selected.product_name}`],
+      macros,
+    });
+  }
+
+  if (selected) {
+    const macros = computeMacros(selected, grams || "0");
+    return (
+      <div style={FS.overlay}>
+        <div style={FS.modal}>
+          <div style={FS.modalTitle}>{selected.product_name}</div>
+          <div style={FS.modalBrand}>{selected.brands || ""}</div>
+          <div style={FS.gramRow}>
+            <span style={FS.gramLabel}>Quantité</span>
+            <input type="number" inputMode="numeric" value={grams} onChange={e => setGrams(e.target.value)} style={FS.gramInput} />
+            <span style={FS.gramUnit}>g</span>
+          </div>
+          <div style={FS.macroGrid}>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#e8a020" }}>{macros.kcal}</div><div style={FS.macroLab}>kcal</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#1a6b3c" }}>{macros.protein}g</div><div style={FS.macroLab}>protéines</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#1a3a6b" }}>{macros.carbs}g</div><div style={FS.macroLab}>glucides</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#6b1a6b" }}>{macros.fat}g</div><div style={FS.macroLab}>lipides</div></div>
+          </div>
+          <button style={{ ...FS.addBtn, background: "#1a6b3c" }} onClick={confirmAdd}>✅ Ajouter au repas</button>
+          <button style={FS.backBtn} onClick={() => setSelected(null)}>← Retour aux résultats</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={FS.overlay}>
+      <div style={FS.modal}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.modalTitle}>🔍 Recherche aliment</div>
+          <button style={FS.closeBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={FS.searchRow}>
+          <input
+            type="text"
+            placeholder="Ex: poulet, riz blanc, saumon..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && search()}
+            style={FS.searchInput}
+            autoFocus
+          />
+          <button style={FS.searchBtn} onClick={search}>→</button>
+        </div>
+        <div style={{ fontSize: 10, color: "#aaa", marginBottom: 12 }}>Source : Open Food Facts</div>
+        {loading && <div style={FS.status}>Recherche en cours...</div>}
+        {error && <div style={{ ...FS.status, color: "#c0392b" }}>{error}</div>}
+        {results.map((p, i) => (
+          <button key={i} style={FS.resultItem} onClick={() => setSelected(p)}>
+            <div style={FS.resultName}>{p.product_name}</div>
+            <div style={FS.resultMeta}>
+              {p.brands && <span>{p.brands} · </span>}
+              <span style={{ color: "#e8a020", fontWeight: 700 }}>{Math.round(p.nutriments["energy-kcal_100g"])} kcal/100g</span>
+              <span> · P: {Math.round(p.nutriments["proteins_100g"] || 0)}g · G: {Math.round(p.nutriments["carbohydrates_100g"] || 0)}g</span>
+            </div>
+          </button>
+        ))}
+        {results.length === 0 && !loading && !error && (
+          <div style={FS.status}>Tape un aliment et appuie sur →</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const FS = {
+  overlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" },
+  modal: { background: "#fff", borderRadius: "20px 20px 0 0", padding: "20px 16px 40px", width: "100%", maxWidth: 480, maxHeight: "85vh", overflowY: "auto" },
+  modalTitle: { fontSize: 16, fontWeight: 800, color: "#1a1a2e", marginBottom: 2 },
+  modalBrand: { fontSize: 12, color: "#888", marginBottom: 16 },
+  closeBtn: { background: "#f0f0f0", border: "none", borderRadius: 20, width: 30, height: 30, fontSize: 13, cursor: "pointer", color: "#555" },
+  searchRow: { display: "flex", gap: 8, marginBottom: 6 },
+  searchInput: { flex: 1, border: "1.5px solid #e0e0e0", borderRadius: 10, padding: "10px 12px", fontSize: 14, outline: "none", color: "#1a1a2e" },
+  searchBtn: { background: "#1a1a2e", border: "none", borderRadius: 10, width: 44, color: "#fff", fontSize: 18, cursor: "pointer", fontWeight: 700 },
+  status: { textAlign: "center", color: "#888", fontSize: 13, padding: "20px 0" },
+  resultItem: { width: "100%", background: "#f8f8f8", border: "none", borderRadius: 10, padding: "12px 14px", marginBottom: 8, textAlign: "left", cursor: "pointer" },
+  resultName: { fontSize: 13, fontWeight: 700, color: "#1a1a2e", marginBottom: 3 },
+  resultMeta: { fontSize: 11, color: "#777" },
+  gramRow: { display: "flex", alignItems: "center", gap: 10, background: "#f5f5f5", borderRadius: 10, padding: "12px 16px", marginBottom: 16 },
+  gramLabel: { fontSize: 13, fontWeight: 700, color: "#333", flex: 1 },
+  gramInput: { border: "1.5px solid #ddd", borderRadius: 8, padding: "8px", fontSize: 18, fontWeight: 700, width: 80, textAlign: "center", outline: "none" },
+  gramUnit: { fontSize: 13, color: "#888" },
+  macroGrid: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 16 },
+  macroBox: { background: "#f5f5f5", borderRadius: 8, padding: "10px 6px", textAlign: "center" },
+  macroVal: { fontSize: 14, fontWeight: 800 },
+  macroLab: { fontSize: 9, color: "#888", marginTop: 2, textTransform: "uppercase" },
+  addBtn: { width: "100%", padding: "14px", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, color: "#fff", cursor: "pointer", marginBottom: 10 },
+  backBtn: { width: "100%", padding: "12px", border: "1.5px solid #ddd", borderRadius: 12, fontSize: 13, color: "#555", cursor: "pointer", background: "transparent", fontWeight: 600 },
+};
+function FoodSearch({ onAdd, onClose }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [grams, setGrams] = useState("100");
+  const [error, setError] = useState("");
+
+  const search = useCallback(async () => {
+    if (!query.trim()) return;
+    setLoading(true);
+    setError("");
+    setResults([]);
+    try {
+      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=10&lc=fr&cc=fr`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const items = (data.products || []).filter(p =>
+        p.product_name && p.nutriments &&
+        p.nutriments["energy-kcal_100g"] != null
+      ).slice(0, 8);
+      setResults(items);
+      if (items.length === 0) setError("Aucun résultat. Essaie un autre terme.");
+    } catch {
+      setError("Erreur de connexion. Vérifie ta connexion internet.");
+    }
+    setLoading(false);
+  }, [query]);
+
+  function computeMacros(product, g) {
+    const n = product.nutriments;
+    const factor = parseFloat(g) / 100;
+    return {
+      kcal: Math.round((n["energy-kcal_100g"] || 0) * factor),
+      protein: Math.round((n["proteins_100g"] || 0) * factor * 10) / 10,
+      carbs: Math.round((n["carbohydrates_100g"] || 0) * factor * 10) / 10,
+      fat: Math.round((n["fat_100g"] || 0) * factor * 10) / 10,
+    };
+  }
+
+  function confirmAdd() {
+    if (!selected || !grams) return;
+    const macros = computeMacros(selected, grams);
+    onAdd({
+      name: `${selected.product_name} (${grams}g)`,
+      items: [`${grams}g de ${selected.product_name}`],
+      macros,
+    });
+  }
+
+  if (selected) {
+    const macros = computeMacros(selected, grams || "0");
+    return (
+      <div style={FS.overlay}>
+        <div style={FS.modal}>
+          <div style={FS.modalTitle}>{selected.product_name}</div>
+          <div style={FS.modalBrand}>{selected.brands || ""}</div>
+          <div style={FS.gramRow}>
+            <span style={FS.gramLabel}>Quantité</span>
+            <input type="number" inputMode="numeric" value={grams} onChange={e => setGrams(e.target.value)} style={FS.gramInput} />
+            <span style={FS.gramUnit}>g</span>
+          </div>
+          <div style={FS.macroGrid}>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#e8a020" }}>{macros.kcal}</div><div style={FS.macroLab}>kcal</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#1a6b3c" }}>{macros.protein}g</div><div style={FS.macroLab}>protéines</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#1a3a6b" }}>{macros.carbs}g</div><div style={FS.macroLab}>glucides</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#6b1a6b" }}>{macros.fat}g</div><div style={FS.macroLab}>lipides</div></div>
+          </div>
+          <button style={{ ...FS.addBtn, background: "#1a6b3c" }} onClick={confirmAdd}>✅ Ajouter au repas</button>
+          <button style={FS.backBtn} onClick={() => setSelected(null)}>← Retour aux résultats</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={FS.overlay}>
+      <div style={FS.modal}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.modalTitle}>🔍 Recherche aliment</div>
+          <button style={FS.closeBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={FS.searchRow}>
+          <input
+            type="text"
+            placeholder="Ex: poulet, riz blanc, saumon..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && search()}
+            style={FS.searchInput}
+            autoFocus
+          />
+          <button style={FS.searchBtn} onClick={search}>→</button>
+        </div>
+        <div style={{ fontSize: 10, color: "#aaa", marginBottom: 12 }}>Source : Open Food Facts</div>
+        {loading && <div style={FS.status}>Recherche en cours...</div>}
+        {error && <div style={{ ...FS.status, color: "#c0392b" }}>{error}</div>}
+        {results.map((p, i) => (
+          <button key={i} style={FS.resultItem} onClick={() => setSelected(p)}>
+            <div style={FS.resultName}>{p.product_name}</div>
+            <div style={FS.resultMeta}>
+              {p.brands && <span>{p.brands} · </span>}
+              <span style={{ color: "#e8a020", fontWeight: 700 }}>{Math.round(p.nutriments["energy-kcal_100g"])} kcal/100g</span>
+              <span> · P: {Math.round(p.nutriments["proteins_100g"] || 0)}g · G: {Math.round(p.nutriments["carbohydrates_100g"] || 0)}g</span>
+            </div>
+          </button>
+        ))}
+        {results.length === 0 && !loading && !error && (
+          <div style={FS.status}>Tape un aliment et appuie sur →</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const FS = {
+  overlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" },
+  modal: { background: "#fff", borderRadius: "20px 20px 0 0", padding: "20px 16px 40px", width: "100%", maxWidth: 480, maxHeight: "85vh", overflowY: "auto" },
+  modalTitle: { fontSize: 16, fontWeight: 800, color: "#1a1a2e", marginBottom: 2 },
+  modalBrand: { fontSize: 12, color: "#888", marginBottom: 16 },
+  closeBtn: { background: "#f0f0f0", border: "none", borderRadius: 20, width: 30, height: 30, fontSize: 13, cursor: "pointer", color: "#555" },
+  searchRow: { display: "flex", gap: 8, marginBottom: 6 },
+  searchInput: { flex: 1, border: "1.5px solid #e0e0e0", borderRadius: 10, padding: "10px 12px", fontSize: 14, outline: "none", color: "#1a1a2e" },
+  searchBtn: { background: "#1a1a2e", border: "none", borderRadius: 10, width: 44, color: "#fff", fontSize: 18, cursor: "pointer", fontWeight: 700 },
+  status: { textAlign: "center", color: "#888", fontSize: 13, padding: "20px 0" },
+  resultItem: { width: "100%", background: "#f8f8f8", border: "none", borderRadius: 10, padding: "12px 14px", marginBottom: 8, textAlign: "left", cursor: "pointer" },
+  resultName: { fontSize: 13, fontWeight: 700, color: "#1a1a2e", marginBottom: 3 },
+  resultMeta: { fontSize: 11, color: "#777" },
+  gramRow: { display: "flex", alignItems: "center", gap: 10, background: "#f5f5f5", borderRadius: 10, padding: "12px 16px", marginBottom: 16 },
+  gramLabel: { fontSize: 13, fontWeight: 700, color: "#333", flex: 1 },
+  gramInput: { border: "1.5px solid #ddd", borderRadius: 8, padding: "8px", fontSize: 18, fontWeight: 700, width: 80, textAlign: "center", outline: "none" },
+  gramUnit: { fontSize: 13, color: "#888" },
+  macroGrid: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 16 },
+  macroBox: { background: "#f5f5f5", borderRadius: 8, padding: "10px 6px", textAlign: "center" },
+  macroVal: { fontSize: 14, fontWeight: 800 },
+  macroLab: { fontSize: 9, color: "#888", marginTop: 2, textTransform: "uppercase" },
+  addBtn: { width: "100%", padding: "14px", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, color: "#fff", cursor: "pointer", marginBottom: 10 },
+  backBtn: { width: "100%", padding: "12px", border: "1.5px solid #ddd", borderRadius: 12, fontSize: 13, color: "#555", cursor: "pointer", background: "transparent", fontWeight: 600 },
+};
+function FoodSearch({ onAdd, onClose }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [grams, setGrams] = useState("100");
+  const [error, setError] = useState("");
+
+  const search = useCallback(async () => {
+    if (!query.trim()) return;
+    setLoading(true);
+    setError("");
+    setResults([]);
+    try {
+      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=10&lc=fr&cc=fr`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const items = (data.products || []).filter(p =>
+        p.product_name && p.nutriments &&
+        p.nutriments["energy-kcal_100g"] != null
+      ).slice(0, 8);
+      setResults(items);
+      if (items.length === 0) setError("Aucun résultat. Essaie un autre terme.");
+    } catch {
+      setError("Erreur de connexion. Vérifie ta connexion internet.");
+    }
+    setLoading(false);
+  }, [query]);
+
+  function computeMacros(product, g) {
+    const n = product.nutriments;
+    const factor = parseFloat(g) / 100;
+    return {
+      kcal: Math.round((n["energy-kcal_100g"] || 0) * factor),
+      protein: Math.round((n["proteins_100g"] || 0) * factor * 10) / 10,
+      carbs: Math.round((n["carbohydrates_100g"] || 0) * factor * 10) / 10,
+      fat: Math.round((n["fat_100g"] || 0) * factor * 10) / 10,
+    };
+  }
+
+  function confirmAdd() {
+    if (!selected || !grams) return;
+    const macros = computeMacros(selected, grams);
+    onAdd({
+      name: `${selected.product_name} (${grams}g)`,
+      items: [`${grams}g de ${selected.product_name}`],
+      macros,
+    });
+  }
+
+  if (selected) {
+    const macros = computeMacros(selected, grams || "0");
+    return (
+      <div style={FS.overlay}>
+        <div style={FS.modal}>
+          <div style={FS.modalTitle}>{selected.product_name}</div>
+          <div style={FS.modalBrand}>{selected.brands || ""}</div>
+          <div style={FS.gramRow}>
+            <span style={FS.gramLabel}>Quantité</span>
+            <input type="number" inputMode="numeric" value={grams} onChange={e => setGrams(e.target.value)} style={FS.gramInput} />
+            <span style={FS.gramUnit}>g</span>
+          </div>
+          <div style={FS.macroGrid}>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#e8a020" }}>{macros.kcal}</div><div style={FS.macroLab}>kcal</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#1a6b3c" }}>{macros.protein}g</div><div style={FS.macroLab}>protéines</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#1a3a6b" }}>{macros.carbs}g</div><div style={FS.macroLab}>glucides</div></div>
+            <div style={FS.macroBox}><div style={{ ...FS.macroVal, color: "#6b1a6b" }}>{macros.fat}g</div><div style={FS.macroLab}>lipides</div></div>
+          </div>
+          <button style={{ ...FS.addBtn, background: "#1a6b3c" }} onClick={confirmAdd}>✅ Ajouter au repas</button>
+          <button style={FS.backBtn} onClick={() => setSelected(null)}>← Retour aux résultats</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={FS.overlay}>
+      <div style={FS.modal}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={FS.modalTitle}>🔍 Recherche aliment</div>
+          <button style={FS.closeBtn} onClick={onClose}>✕</button>
+        </div>
+        <div style={FS.searchRow}>
+          <input
+            type="text"
+            placeholder="Ex: poulet, riz blanc, saumon..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && search()}
+            style={FS.searchInput}
+            autoFocus
+          />
+          <button style={FS.searchBtn} onClick={search}>→</button>
+        </div>
+        <div style={{ fontSize: 10, color: "#aaa", marginBottom: 12 }}>Source : Open Food Facts</div>
+        {loading && <div style={FS.status}>Recherche en cours...</div>}
+        {error && <div style={{ ...FS.status, color: "#c0392b" }}>{error}</div>}
+        {results.map((p, i) => (
+          <button key={i} style={FS.resultItem} onClick={() => setSelected(p)}>
+            <div style={FS.resultName}>{p.product_name}</div>
+            <div style={FS.resultMeta}>
+              {p.brands && <span>{p.brands} · </span>}
+              <span style={{ color: "#e8a020", fontWeight: 700 }}>{Math.round(p.nutriments["energy-kcal_100g"])} kcal/100g</span>
+              <span> · P: {Math.round(p.nutriments["proteins_100g"] || 0)}g · G: {Math.round(p.nutriments["carbohydrates_100g"] || 0)}g</span>
+            </div>
+          </button>
+        ))}
+        {results.length === 0 && !loading && !error && (
+          <div style={FS.status}>Tape un aliment et appuie sur →</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const FS = {
+  overlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" },
+  modal: { background: "#fff", borderRadius: "20px 20px 0 0", padding: "20px 16px 40px", width: "100%", maxWidth: 480, maxHeight: "85vh", overflowY: "auto" },
+  modalTitle: { fontSize: 16, fontWeight: 800, color: "#1a1a2e", marginBottom: 2 },
+  modalBrand: { fontSize: 12, color: "#888", marginBottom: 16 },
+  closeBtn: { background: "#f0f0f0", border: "none", borderRadius: 20, width: 30, height: 30, fontSize: 13, cursor: "pointer", color: "#555" },
+  searchRow: { display: "flex", gap: 8, marginBottom: 6 },
+  searchInput: { flex: 1, border: "1.5px solid #e0e0e0", borderRadius: 10, padding: "10px 12px", fontSize: 14, outline: "none", color: "#1a1a2e" },
+  searchBtn: { background: "#1a1a2e", border: "none", borderRadius: 10, width: 44, color: "#fff", fontSize: 18, cursor: "pointer", fontWeight: 700 },
+  status: { textAlign: "center", color: "#888", fontSize: 13, padding: "20px 0" },
+  resultItem: { width: "100%", background: "#f8f8f8", border: "none", borderRadius: 10, padding: "12px 14px", marginBottom: 8, textAlign: "left", cursor: "pointer" },
+  resultName: { fontSize: 13, fontWeight: 700, color: "#1a1a2e", marginBottom: 3 },
+  resultMeta: { fontSize: 11, color: "#777" },
+  gramRow: { display: "flex", alignItems: "center", gap: 10, background: "#f5f5f5", borderRadius: 10, padding: "12px 16px", marginBottom: 16 },
+  gramLabel: { fontSize: 13, fontWeight: 700, color: "#333", flex: 1 },
+  gramInput: { border: "1.5px solid #ddd", borderRadius: 8, padding: "8px", fontSize: 18, fontWeight: 700, width: 80, textAlign: "center", outline: "none" },
+  gramUnit: { fontSize: 13, color: "#888" },
+  macroGrid: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 16 },
+  macroBox: { background: "#f5f5f5", borderRadius: 8, padding: "10px 6px", textAlign: "center" },
+  macroVal: { fontSize: 14, fontWeight: 800 },
+  macroLab: { fontSize: 9, color: "#888", marginTop: 2, textTransform: "uppercase" },
+  addBtn: { width: "100%", padding: "14px", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, color: "#fff", cursor: "pointer", marginBottom: 10 },
+  backBtn: { width: "100%", padding: "12px", border: "1.5px solid #ddd", borderRadius: 12, fontSize: 13, color: "#555", cursor: "pointer", background: "transparent", fontWeight: 600 },
+};
 function WorkoutTab() {
   const [log, setLog] = useStorage(WORKOUT_KEY, {});
   const [view, setView] = useState("home");
@@ -176,11 +581,7 @@ function WorkoutTab() {
     return Object.values(log).filter(e => e.type === type).sort((a, b) => b.date.localeCompare(a.date))[0] || null;
   }
 
-  const weekSessions = Object.values(log).filter(s => {
-    const d = new Date(s.date);
-    return d >= new Date(Date.now() - 7 * 864e5);
-  });
-
+  const weekSessions = Object.values(log).filter(s => new Date(s.date) >= new Date(Date.now() - 7 * 864e5));
   const prog = activeSession ? PROGRAM[activeSession] : null;
 
   if (view === "done") return (
@@ -235,11 +636,9 @@ function WorkoutTab() {
         <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", letterSpacing: 2 }}>{prog.label}</div>
         <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{prog.day} · {new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</div>
       </div>
-
       {getPrev(activeSession) && (
         <div style={S.prevBanner}>📅 Dernière séance : {formatDate(getPrev(activeSession).date)}</div>
       )}
-
       {prog.exercises.map(ex => {
         const prevData = getPrev(activeSession)?.data?.[ex.name];
         return (
@@ -293,14 +692,13 @@ function WorkoutTab() {
         </div>
         <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>{weekSessions.length}/4 séances cette semaine</div>
       </div>
-
       <div style={S.sectionLabel}>Commencer une séance</div>
       {Object.entries(PROGRAM).map(([type, p]) => {
         const last = getPrev(type);
         return (
           <button key={type} style={{ ...S.card, ...S.clickable, borderLeft: `4px solid ${p.color}`, display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={() => startSession(type)}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: p.color, letterSpacing: 0.5 }}>{p.label} <span style={{ fontWeight: 400, color: "#999", fontSize: 12 }}>— {p.day}</span></div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: p.color }}>{p.label} <span style={{ fontWeight: 400, color: "#999", fontSize: 12 }}>— {p.day}</span></div>
               <div style={{ fontSize: 12, color: "#777", marginTop: 2 }}>{p.exercises.length} exercices</div>
               {last && <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>Dernière fois : {formatDate(last.date)}</div>}
             </div>
@@ -314,11 +712,11 @@ function WorkoutTab() {
   );
 }
 
-// ─── SUIVI DIÈTE ─────────────────────────────────────────────────────────────
-
 function DietTab() {
   const [log, setLog] = useStorage(DIET_KEY, {});
   const [selectingMeal, setSelectingMeal] = useState(null);
+  const [showFoodSearch, setShowFoodSearch] = useState(false);
+  const [currentMealKey, setCurrentMealKey] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
 
   const today = todayKey();
@@ -329,21 +727,53 @@ function DietTab() {
   }
 
   function selectOption(mealKey, option) {
-    updateToday({ meals: { ...todayLog.meals, [mealKey]: option } });
+    const meals = { ...(todayLog.meals || {}) };
+    if (!meals[mealKey]) meals[mealKey] = [];
+    meals[mealKey] = [...meals[mealKey], option];
+    updateToday({ meals });
     setSelectingMeal(null);
+    setShowFoodSearch(false);
   }
 
-  function removeMeal(mealKey) {
-    const meals = { ...todayLog.meals };
-    delete meals[mealKey];
+  function removeMealItem(mealKey, idx) {
+    const meals = { ...(todayLog.meals || {}) };
+    meals[mealKey] = meals[mealKey].filter((_, i) => i !== idx);
+    if (meals[mealKey].length === 0) delete meals[mealKey];
     updateToday({ meals });
   }
 
-  const totals = Object.values(todayLog.meals).reduce(
-    (acc, m) => ({ kcal: acc.kcal + (m.macros?.kcal || 0), protein: acc.protein + (m.macros?.protein || 0), carbs: acc.carbs + (m.macros?.carbs || 0), fat: acc.fat + (m.macros?.fat || 0) }),
-    { kcal: 0, protein: 0, carbs: 0, fat: 0 }
-  );
+  function openFoodSearch(mealKey) {
+    setCurrentMealKey(mealKey);
+    setSelectingMeal(null);
+    setShowFoodSearch(true);
+  }
+
+  function getMealMacros(mealKey) {
+    const items = todayLog.meals?.[mealKey] || [];
+    return items.reduce((acc, item) => ({
+      kcal: acc.kcal + (item.macros?.kcal || 0),
+      protein: acc.protein + (item.macros?.protein || 0),
+      carbs: acc.carbs + (item.macros?.carbs || 0),
+      fat: acc.fat + (item.macros?.fat || 0),
+    }), { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+  }
+
+  const totals = Object.keys(MEALS).reduce((acc, key) => {
+    const m = getMealMacros(key);
+    return { kcal: acc.kcal + m.kcal, protein: acc.protein + m.protein, carbs: acc.carbs + m.carbs, fat: acc.fat + m.fat };
+  }, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+
   const pctKcal = Math.round((totals.kcal / DAILY_TARGET.kcal) * 100);
+
+  if (showFoodSearch) return (
+    <>
+      <div style={S.tabContent} />
+      <FoodSearch
+        onAdd={(option) => { selectOption(currentMealKey, option); setShowFoodSearch(false); }}
+        onClose={() => setShowFoodSearch(false)}
+      />
+    </>
+  );
 
   if (selectingMeal) {
     const meal = MEALS[selectingMeal];
@@ -361,12 +791,12 @@ function DietTab() {
               <span style={{ color: meal.color, fontWeight: 700, fontSize: 12 }}>{opt.macros.kcal} kcal</span>
               <span style={{ fontSize: 11, color: "#777", fontWeight: 600 }}>P: {opt.macros.protein}g</span>
               <span style={{ fontSize: 11, color: "#777", fontWeight: 600 }}>G: {opt.macros.carbs}g</span>
-              <span style={{ fontSize: 11, color: "#777", fontWeight: 600 }}>L: {opt.macros.fat}g</span>
             </div>
           </button>
         ))}
-        <button style={S.ghostBtn} onClick={() => selectOption(selectingMeal, { name: "Repas libre", items: [], macros: { kcal: 0, protein: 0, carbs: 0, fat: 0 } })}>
-          ✏️ Repas libre (sans comptage)
+        <button style={{ ...S.ghostBtn, borderStyle: "dashed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+          onClick={() => openFoodSearch(selectingMeal)}>
+          🔍 Rechercher un aliment
         </button>
         <div style={{ height: 32 }} />
       </div>
@@ -381,7 +811,11 @@ function DietTab() {
         <div style={S.sectionLabel}>14 derniers jours</div>
         {entries.length === 0 && <div style={S.empty}>Aucun historique.</div>}
         {entries.map(([date, entry]) => {
-          const t = Object.values(entry.meals || {}).reduce((acc, m) => ({ kcal: acc.kcal + (m.macros?.kcal || 0), protein: acc.protein + (m.macros?.protein || 0) }), { kcal: 0, protein: 0 });
+          const t = Object.keys(MEALS).reduce((acc, key) => {
+            const items = entry.meals?.[key] || [];
+            const m = items.reduce((a, i) => ({ kcal: a.kcal + (i.macros?.kcal || 0), protein: a.protein + (i.macros?.protein || 0) }), { kcal: 0, protein: 0 });
+            return { kcal: acc.kcal + m.kcal, protein: acc.protein + m.protein };
+          }, { kcal: 0, protein: 0 });
           return (
             <div key={date} style={S.card}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
@@ -393,8 +827,7 @@ function DietTab() {
                 <span style={{ fontSize: 11, color: "#777" }}>P: {t.protein}g</span>
                 <span style={{ fontSize: 11, color: "#1a3a6b" }}>💧 {(entry.water || 0) * 375}ml</span>
               </div>
-              {Object.values(entry.meals || {}).map((m, i) => <div key={i} style={{ fontSize: 12, color: "#555", lineHeight: 1.6 }}>· {m.name}</div>)}
-              {entry.note && <div style={{ fontSize: 11, color: "#aaa", fontStyle: "italic", marginTop: 4 }}>"{entry.note}"</div>}
+              {entry.note && <div style={{ fontSize: 11, color: "#aaa", fontStyle: "italic" }}>"{entry.note}"</div>}
             </div>
           );
         })}
@@ -405,7 +838,6 @@ function DietTab() {
 
   return (
     <div style={S.tabContent}>
-      {/* BILAN */}
       <div style={S.card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div style={S.sectionLabel}>Bilan du jour</div>
@@ -417,7 +849,6 @@ function DietTab() {
         <MacroBar label="Lipides" value={totals.fat} target={DAILY_TARGET.fat} color="#6b1a6b" />
       </div>
 
-      {/* POIDS + EAU */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
         <div style={S.card}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>⚖️ Poids</div>
@@ -430,48 +861,50 @@ function DietTab() {
           <div style={{ fontSize: 11, fontWeight: 700, color: "#1a3a6b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>💧 Eau</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             {Array.from({ length: 8 }).map((_, i) => (
-              <button key={i} onClick={() => updateToday({ water: i < todayLog.water ? i : i + 1 })}
-                style={{ width: 22, height: 22, borderRadius: 4, border: "none", cursor: "pointer", background: i < (todayLog.water || 0) ? "#1a3a6b" : "#e8e8f0", fontSize: 10 }}>
-                💧
-              </button>
+              <button key={i} onClick={() => updateToday({ water: i < (todayLog.water || 0) ? i : i + 1 })}
+                style={{ width: 22, height: 22, borderRadius: 4, border: "none", cursor: "pointer", background: i < (todayLog.water || 0) ? "#1a3a6b" : "#e8e8f0", fontSize: 10 }}>💧</button>
             ))}
           </div>
           <div style={{ fontSize: 10, color: "#1a3a6b", fontWeight: 700, marginTop: 4 }}>{(todayLog.water || 0) * 375}ml</div>
         </div>
       </div>
 
-      {/* REPAS */}
       <div style={S.sectionLabel}>Repas du jour</div>
       {Object.entries(MEALS).map(([key, meal]) => {
-        const logged = todayLog.meals?.[key];
+        const items = todayLog.meals?.[key] || [];
+        const mealMacros = getMealMacros(key);
         return (
           <div key={key} style={{ ...S.card, borderLeft: `4px solid ${meal.color}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>{meal.emoji} {meal.label}</div>
-                {logged ? (
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{meal.emoji} {meal.label}</div>
+                {items.length > 0 ? (
                   <>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2e", marginBottom: 3 }}>{logged.name}</div>
-                    {logged.macros?.kcal > 0 && (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ color: meal.color, fontWeight: 700, fontSize: 11 }}>{logged.macros.kcal} kcal</span>
-                        <span style={{ fontSize: 11, color: "#777" }}>P: {logged.macros.protein}g</span>
-                        <span style={{ fontSize: 11, color: "#777" }}>G: {logged.macros.carbs}g</span>
+                    {items.map((item, idx) => (
+                      <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a2e" }}>{item.name}</div>
+                          {item.macros?.kcal > 0 && <div style={{ fontSize: 10, color: "#888" }}>{item.macros.kcal} kcal · P: {item.macros.protein}g</div>}
+                        </div>
+                        <button style={{ background: "none", border: "none", color: "#ccc", fontSize: 14, cursor: "pointer", padding: "0 4px" }} onClick={() => removeMealItem(key, idx)}>✕</button>
+                      </div>
+                    ))}
+                    {items.length > 1 && (
+                      <div style={{ fontSize: 11, color: meal.color, fontWeight: 700, marginTop: 4 }}>
+                        Total : {mealMacros.kcal} kcal · P: {mealMacros.protein}g
                       </div>
                     )}
                   </>
-                ) : <div style={{ fontSize: 12, color: "#bbb", fontStyle: "italic" }}>Non enregistré</div>}
+                ) : (
+                  <div style={{ fontSize: 12, color: "#bbb", fontStyle: "italic" }}>Non enregistré</div>
+                )}
               </div>
-              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                <button style={{ ...S.iconBtn, background: meal.color }} onClick={() => setSelectingMeal(key)}>{logged ? "✏️" : "+"}</button>
-                {logged && <button style={{ ...S.iconBtn, background: "#f0f0f0", color: "#aaa" }} onClick={() => removeMeal(key)}>✕</button>}
-              </div>
+              <button style={{ ...S.iconBtn, background: meal.color, marginLeft: 8 }} onClick={() => setSelectingMeal(key)}>+</button>
             </div>
           </div>
         );
       })}
 
-      {/* NOTE */}
       <div style={S.card}>
         <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>📝 Note du jour</div>
         <textarea style={{ width: "100%", border: "1.5px solid #e8e8e8", borderRadius: 8, padding: 10, fontSize: 13, color: "#333", resize: "none", height: 70, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
@@ -481,7 +914,6 @@ function DietTab() {
         />
       </div>
 
-      {/* RÈGLES */}
       <div style={{ ...S.card, background: "#1a1a2e" }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: "#8888aa", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Règles non négociables</div>
         {[["⏰", "Ne jamais sauter le petit-déj"], ["🍽️", "Dîner dans les 90 min post-séance"], ["💊", "Créatine 5g tous les jours"], ["💧", "3L d'eau minimum"]].map(([e, t], i) => (
@@ -498,34 +930,18 @@ function DietTab() {
   );
 }
 
-// ─── APP PRINCIPALE ──────────────────────────────────────────────────────────
-
 export default function App() {
   const [tab, setTab] = useState("workout");
-
   return (
     <div style={{ fontFamily: "-apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif", background: "#f4f4f6", minHeight: "100vh", maxWidth: 480, margin: "0 auto", paddingBottom: 70 }}>
-
-      {/* HEADER */}
       <div style={{ background: "#1a1a2e", padding: "20px 20px 16px", textAlign: "center" }}>
         <div style={{ fontSize: 10, letterSpacing: 2, color: "#8888aa", textTransform: "uppercase", marginBottom: 4 }}>Mon Suivi</div>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: 1 }}>
-          {tab === "workout" ? "💪 Séances" : "🥗 Diète"}
-        </div>
-        <div style={{ fontSize: 11, color: "#8888aa", marginTop: 2 }}>
-          {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
-        </div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: 1 }}>{tab === "workout" ? "💪 Séances" : "🥗 Diète"}</div>
+        <div style={{ fontSize: 11, color: "#8888aa", marginTop: 2 }}>{new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</div>
       </div>
-
-      {/* CONTENT */}
       {tab === "workout" ? <WorkoutTab /> : <DietTab />}
-
-      {/* TAB BAR */}
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "#fff", borderTop: "1px solid #e8e8e8", display: "flex", zIndex: 100 }}>
-        {[
-          { key: "workout", emoji: "💪", label: "Séances" },
-          { key: "diet", emoji: "🥗", label: "Diète" },
-        ].map(t => (
+        {[{ key: "workout", emoji: "💪", label: "Séances" }, { key: "diet", emoji: "🥗", label: "Diète" }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ flex: 1, border: "none", background: "transparent", padding: "10px 0 12px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <span style={{ fontSize: 20 }}>{t.emoji}</span>
@@ -537,8 +953,6 @@ export default function App() {
     </div>
   );
 }
-
-// ─── STYLES PARTAGÉS ─────────────────────────────────────────────────────────
 
 const S = {
   tabContent: { padding: "14px 14px 0" },
@@ -560,6 +974,6 @@ const S = {
   centerCard: { margin: "80px 20px", background: "#fff", borderRadius: 16, padding: "40px 24px", textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" },
   doneTitle: { fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 8 },
   doneSub: { fontSize: 14, color: "#888" },
-  iconBtn: { border: "none", color: "#fff", borderRadius: 8, width: 32, height: 32, fontSize: 14, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+  iconBtn: { border: "none", color: "#fff", borderRadius: 8, width: 32, height: 32, fontSize: 18, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   empty: { textAlign: "center", color: "#aaa", fontSize: 14, padding: "40px 0" },
 };
