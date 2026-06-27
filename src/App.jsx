@@ -305,7 +305,7 @@ function WorkoutTab() {
     setActiveSession(type);
     const prog = PROGRAM[type];
     const init = {};
-    prog.exercises.forEach(ex => { init[ex.name] = Array.from({ length: ex.sets }, () => ({ kg: "", reps: "" })); });
+    prog.exercises.forEach(ex => { init[ex.name] = { sets: Array.from({ length: ex.sets }, () => ({ kg: "", reps: "" })), comment: "" }; });
     setSessionData(init);
     setView("session");
   }
@@ -313,7 +313,15 @@ function WorkoutTab() {
   function updateSet(exName, setIdx, field, value) {
     setSessionData(prev => {
       const u = { ...prev };
-      u[exName] = u[exName].map((s, i) => i === setIdx ? { ...s, [field]: value } : s);
+      u[exName] = { ...u[exName], sets: u[exName].sets.map((s, i) => i === setIdx ? { ...s, [field]: value } : s) };
+      return u;
+    });
+  }
+
+  function updateComment(exName, value) {
+    setSessionData(prev => {
+      const u = { ...prev };
+      u[exName] = { ...u[exName], comment: value };
       return u;
     });
   }
@@ -356,7 +364,7 @@ function WorkoutTab() {
                 <div style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>{formatDate(session.date)}</div>
               </div>
               {p.exercises.map(ex => {
-                const sets = session.data?.[ex.name] || [];
+                const sets = session.data?.[ex.name]?.sets || session.data?.[ex.name] || [];
                 const filled = sets.filter(s => s.kg);
                 if (!filled.length) return null;
                 return (
@@ -365,6 +373,9 @@ function WorkoutTab() {
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {filled.map((s, i) => <span key={i} style={S.setChip}>{s.kg}kg × {s.reps}</span>)}
                     </div>
+                    {session.data?.[ex.name]?.comment && (
+                      <div style={{ fontSize: 11, color: "#888", fontStyle: "italic", marginTop: 3 }}>💬 {session.data[ex.name].comment}</div>
+                    )}
                   </div>
                 );
               })}
@@ -387,7 +398,7 @@ function WorkoutTab() {
         <div style={S.prevBanner}>📅 Dernière séance : {formatDate(getPrev(activeSession).date)}</div>
       )}
       {prog.exercises.map(ex => {
-        const prevData = getPrev(activeSession)?.data?.[ex.name];
+        const prevData = getPrev(activeSession)?.data?.[ex.name]?.sets || getPrev(activeSession)?.data?.[ex.name];
         return (
           <div key={ex.name} style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, gap: 8 }}>
@@ -405,7 +416,7 @@ function WorkoutTab() {
               <span style={S.colHead}>Reps</span>
               {prevData && <span style={S.colHead}>Avant</span>}
             </div>
-            {(sessionData[ex.name] || []).map((s, i) => (
+            {(sessionData[ex.name]?.sets || []).map((s, i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr 1fr" + (prevData ? " 70px" : ""), gap: 5, marginBottom: 5 }}>
                 <div style={{ ...S.setNum, background: prog.color }}>{i + 1}</div>
                 <input style={S.inp} type="number" inputMode="decimal" placeholder="—" value={s.kg} onChange={e => updateSet(ex.name, i, "kg", e.target.value)} />
@@ -413,6 +424,12 @@ function WorkoutTab() {
                 {prevData && <span style={{ fontSize: 11, color: "#aaa", textAlign: "center", alignSelf: "center" }}>{prevData[i]?.kg ? `${prevData[i].kg}×${prevData[i].reps}` : "—"}</span>}
               </div>
             ))}
+            <input
+              style={{ ...S.inp, textAlign: "left", marginTop: 6, fontSize: 12, color: "#555", fontStyle: sessionData[ex.name]?.comment ? "normal" : "italic" }}
+              placeholder="💬 Ressenti, remarque..."
+              value={sessionData[ex.name]?.comment || ""}
+              onChange={e => updateComment(ex.name, e.target.value)}
+            />
           </div>
         );
       })}
