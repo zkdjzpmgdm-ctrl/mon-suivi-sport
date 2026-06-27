@@ -392,7 +392,6 @@ function WorkoutTab() {
       <div style={{ ...S.sessionBanner, background: prog.color }}>
         <button style={S.backBtnWhite} onClick={() => setView("home")}>← Retour</button>
         <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", letterSpacing: 2 }}>{prog.label}</div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{prog.day} · {new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</div>
       </div>
       {getPrev(activeSession) && (
         <div style={S.prevBanner}>📅 Dernière séance : {formatDate(getPrev(activeSession).date)}</div>
