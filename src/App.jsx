@@ -148,13 +148,19 @@ function FoodSearch({ onAdd, onClose }) {
     setError("");
     setResults([]);
     try {
-      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=10&lc=fr&cc=fr`;
+      const url = `https://world.openfoodfacts.org/api/v2/search?search_terms=${encodeURIComponent(query)}&fields=product_name,brands,nutriments&page_size=10&lang=fr&cc=fr`;
       const res = await fetch(url);
       const data = await res.json();
       const items = (data.products || []).filter(p =>
-        p.product_name && p.nutriments &&
-        p.nutriments["energy-kcal_100g"] != null
-      ).slice(0, 8);
+  p.product_name && p.nutriments &&
+  (p.nutriments["energy-kcal_100g"] != null || p.nutriments["energy-kcal"] != null)
+).map(p => ({
+  ...p,
+  nutriments: {
+    ...p.nutriments,
+    "energy-kcal_100g": p.nutriments["energy-kcal_100g"] || (p.nutriments["energy-kcal"] / 10) || 0
+  }
+})).slice(0, 8);
       setResults(items);
       if (items.length === 0) setError("Aucun résultat. Essaie un autre terme.");
     } catch {
