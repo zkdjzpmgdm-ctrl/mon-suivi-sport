@@ -102,6 +102,36 @@ const MEALS = {
 };
 
 const DAILY_TARGET = { kcal: 2900, protein: 165, carbs: 365, fat: 90 };
+
+const WARMUP = {
+  general: [
+    { name: "Jumping jacks", detail: "1 min" },
+    { name: "Cercles d'épaules avant/arrière", detail: "30 sec" },
+    { name: "Rotations de hanches", detail: "30 sec" },
+    { name: "Squats poids de corps", detail: "15 reps" },
+    { name: "Pompes légères", detail: "10 reps" },
+  ],
+  specific: {
+    PUSH: [
+      { name: "Développé couché haltères", detail: "1×15 @ 8kg puis 1×8 @ 12kg" },
+      { name: "Développé militaire haltères", detail: "1×15 @ 6kg" },
+    ],
+    PULL: [
+      { name: "Tractions poids de corps lentes", detail: "1×8 — amplitude complète" },
+      { name: "Rowing haltère léger", detail: "1×12 @ 8kg" },
+    ],
+    LEGS: [
+      { name: "Squats poids de corps lents", detail: "1×20 — descente profonde" },
+      { name: "Fentes poids de corps", detail: "1×10 par jambe" },
+      { name: "Hip thrust sans charge", detail: "1×15 — contraction haute" },
+    ],
+    BRAS: [
+      { name: "Curl léger haltères", detail: "1×15 @ 6kg" },
+      { name: "Rotations d'épaules haltères légers", detail: "1×15 @ 4kg" },
+    ],
+  },
+};
+
 const WORKOUT_KEY = "workout_log_v1";
 const DIET_KEY = "diet_log_v1";
 
@@ -301,6 +331,7 @@ function WorkoutTab() {
   const [sessionData, setSessionData] = useState({});
   const [showHistory, setShowHistory] = useState(false);
   const [summary, setSummary] = useState("");
+  const [showWarmup, setShowWarmup] = useState(true);
 
   function startSession(type) {
     setActiveSession(type);
@@ -435,6 +466,39 @@ function WorkoutTab() {
       {getPrev(activeSession) && (
         <div style={S.prevBanner}>📅 Dernière séance : {formatDate(getPrev(activeSession).date)}</div>
       )}
+
+      {/* WARMUP BLOCK */}
+      <div style={{ background: "#fff", borderRadius: 12, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+        <div
+          onClick={() => setShowWarmup(!showWarmup)}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", cursor: "pointer", background: "#fff8e1" }}
+        >
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#886600" }}>⚡ Échauffement</span>
+            <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>{showWarmup ? "Appuie pour réduire" : "Appuie pour voir"}</span>
+          </div>
+          <span style={{ fontSize: 16, color: "#886600" }}>{showWarmup ? "▲" : "▼"}</span>
+        </div>
+        {showWarmup && (
+          <div style={{ padding: "12px 16px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Général — 5 min</div>
+            {WARMUP.general.map((w, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f5f5f5" }}>
+                <span style={{ fontSize: 12, color: "#333", fontWeight: 500 }}>{w.name}</span>
+                <span style={{ fontSize: 12, color: "#886600", fontWeight: 700 }}>{w.detail}</span>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, margin: "12px 0 8px" }}>Activation spécifique {prog.label}</div>
+            {WARMUP.specific[activeSession]?.map((w, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f5f5f5" }}>
+                <span style={{ fontSize: 12, color: "#333", fontWeight: 500, flex: 1, paddingRight: 8 }}>{w.name}</span>
+                <span style={{ fontSize: 12, color: prog.color, fontWeight: 700, textAlign: "right" }}>{w.detail}</span>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: "#aaa", fontStyle: "italic", marginTop: 10 }}>⚠️ Ne jamais commencer sans échauffement</div>
+          </div>
+        )}
+      </div>
       {prog.exercises.map(ex => {
         const prevData = getPrev(activeSession)?.data?.[ex.name]?.sets || getPrev(activeSession)?.data?.[ex.name];
         return (
