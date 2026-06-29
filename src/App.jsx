@@ -300,6 +300,7 @@ function WorkoutTab() {
   const [activeSession, setActiveSession] = useState(null);
   const [sessionData, setSessionData] = useState({});
   const [showHistory, setShowHistory] = useState(false);
+  const [summary, setSummary] = useState("");
 
   function startSession(type) {
     setActiveSession(type);
@@ -329,6 +330,24 @@ function WorkoutTab() {
   function saveSession() {
     const key = todayKey() + "_" + activeSession;
     setLog(prev => ({ ...prev, [key]: { type: activeSession, date: todayKey(), data: sessionData } }));
+    // Generate summary
+    const prog = PROGRAM[activeSession];
+    const dateStr = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+    let summary = `💪 ${prog.label} — ${dateStr}\n\n`;
+    let exIdx = 1;
+    prog.exercises.forEach(ex => {
+      const exData = sessionData[ex.name];
+      const sets = exData?.sets || [];
+      const filled = sets.filter(s => s.kg || s.reps);
+      if (!filled.length) return;
+      const setsStr = filled.map(s => s.reps || "?").join("/");
+      const kg = filled[0]?.kg ? `@ ${filled[0].kg} kg` : "";
+      summary += `${exIdx}️⃣ ${ex.name} : ${filled.length}×${setsStr} ${kg}\n`;
+      if (exData?.comment) summary += `   💬 ${exData.comment}\n`;
+      summary += "\n";
+      exIdx++;
+    });
+    setSummary(summary.trim());
     setView("done");
   }
 
@@ -340,11 +359,31 @@ function WorkoutTab() {
   const prog = activeSession ? PROGRAM[activeSession] : null;
 
   if (view === "done") return (
-    <div style={S.centerCard}>
-      <div style={{ fontSize: 48, marginBottom: 12 }}>💪</div>
-      <div style={S.doneTitle}>Séance terminée !</div>
-      <div style={S.doneSub}>Enregistrée avec succès</div>
-      <button style={{ ...S.btn, background: "#1a1a2e", marginTop: 24 }} onClick={() => setView("home")}>Retour</button>
+    <div style={{ ...S.tabContent, paddingTop: 20 }}>
+      <div style={{ textAlign: "center", marginBottom: 20 }}>
+        <div style={{ fontSize: 48, marginBottom: 8 }}>💪</div>
+        <div style={S.doneTitle}>Séance terminée !</div>
+        <div style={S.doneSub}>Enregistrée avec succès</div>
+      </div>
+      <div style={{ background: "#1a1a2e", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#8888aa", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>📋 Récapitulatif</div>
+        <pre style={{ fontSize: 12, color: "#ddd", whiteSpace: "pre-wrap", fontFamily: "inherit", lineHeight: 1.6, margin: 0 }}>{summary}</pre>
+      </div>
+      <button style={{ ...S.btn, background: "#1a6b3c", marginBottom: 10 }} onClick={() => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(summary).then(() => alert("Copié !"));
+        } else {
+          const el = document.createElement("textarea");
+          el.value = summary;
+          document.body.appendChild(el);
+          el.select();
+          document.execCommand("copy");
+          document.body.removeChild(el);
+          alert("Copié !");
+        }
+      }}>📋 Copier le récapitulatif</button>
+      <button style={{ ...S.btn, background: "#1a1a2e" }} onClick={() => setView("home")}>Retour à l'accueil</button>
+      <div style={{ height: 32 }} />
     </div>
   );
 
